@@ -1,6 +1,11 @@
 import React from 'react';
 import Graph from 'react-graph-vis';
-
+import UserTable from '../ExploreForm/userTable';
+import TraverseTable from '../ExploreForm/traverseTable';
+import queue from 'queue';
+import Set from 'simple-hashset';
+import {Button} from 'react-bootstrap';
+import './Network.css'
 class Network extends React.Component {
     constructor() {
         super();
@@ -9,44 +14,46 @@ class Network extends React.Component {
                 nodes: [],
                 edges: []
             },
+            user: [],
             user_name: '',
             value: null,
             avatar: null,
             followers: [],
             following: [],
             clicking_node: [],
-            clicked_nodes: []
-
+            clicked_nodes: [],
+            tra_user: {
+                user_1: '',
+                user_2: '',
+            },
+            connections: [],
         };
         this.handleChange = this.handleChange.bind(this);
         this.handleSubmit = this.handleSubmit.bind(this);
     }
 
+    componentDidUpdate() {
+        this.renderGraph();
+    }
     componentDidMount() {
         this.initGraph();
-        // this.initSelf('coldray');
     }
 
-    initGraph() {
-        this.setState({
-            graph: {
-                nodes: [
-                    {id: 1, label: 'Node 1'},
-                    {id: 2, label: 'Node 2'},
-                    {id: 3, label: 'Node 3'},
-                    {id: 4, label: 'Node 4'},
-                    {id: 5, label: 'Node 5'}
-                ],
-                edges: [
-                    {from: 1, to: 2},
-                    {from: 1, to: 3},
-                    {from: 2, to: 4},
-                    {from: 2, to: 5}
-                ]
-            },
-            counter: 1
+    initGraph(username, url) {
+        if (username && url) {
+            this.setState({
+                graph: {
+                    nodes: [
+                        {id: username, label: username, shape: 'image', image: {
+                            selected: url,
+                            unselected: url,
+                        }},
+                    ],
+                    edges: []
+                }
 
-        });
+            });
+        }
     }
 
     getOptions() {
@@ -136,33 +143,15 @@ class Network extends React.Component {
         return filteredEdges;
     }
 
-    get_avatar_from_user(username) {
-        let request = new Request('https://api.github.com/users/' + username.toString(), {
-            method: 'GET',
-            cache: false
-        });
 
-        fetch(request)
-            .then((res) => res.json())
-            .then((data) => {
-                console.log(data.avatar_url);
-
-                this.setState({
-                  avatar: data.avatar_url
-              });
-            });
-
-    }
-
-
-
-    initSelf(username) {
+    //pass name and url to init self
+    initSelf(username, url) {
         this.setState({
             graph: {
                 nodes: [
-                    {id: username.toString(), label: username.toString(), shape: 'image', image: {
-                        selected: this.state.avatar,
-                        unselected: this.state.avatar
+                    {id: username, label: username, shape: 'image', image: {
+                        selected: url,
+                        unselected: url
                     }},
                 ],
                 edges: []
@@ -174,60 +163,87 @@ class Network extends React.Component {
     handleChange(event) {
         console.log(event.target.value);
         this.setState({value: event.target.value});
-        console.log(this.get_avatar_from_user('coldray'));
     }
 
     handleSubmit(event) {
         alert('A name was submitted: ' + this.state.value);
         event.preventDefault();
-        this.initSelf(this.state.value);
-        this.renderGraph();
-    }
+        let request = new Request('http://localhost:3000/users?name=' + this.state.value.toString(), {
+            method: 'GET',
+            cache: false
+        });
+        this.setState({
+            user: [],
+        });
+        fetch(request)
+            .then((res) => res.json())
+            .then((data) => {
+                if (data.login && data.avatar_url) {
+                        this.setState({
+                            graph: {
+                                nodes: [
+                                    {id: data.login, label: data.login, shape: 'image', image: {
+                                        selected: data.avatar_url,
+                                        unselected: data.avatar_url,
+                                    }},
+                                ],
+                                edges: []
+                            }
 
-    getFollowers(username) {
-        console.log("username: " + username);
-        if (username) {
-            let request = new Request('https://api.github.com/users/' + username + '/followers', {
-                method: 'GET',
-                cache: false
+                        });
+                }
+                return data;
             });
-
-            fetch(request)
-                .then((res) => res.json())
-                .then((data) => {
-
-                    this.setState({
-                        followers: data
-                    });
-                    return data;
-                });
-        }
-
+        console.log('click the search');
+        console.log(this.state.user.login);
+        console.log(this.state.user.avatar_url);
+        this.initSelf(this.state.user.login, this.state.user.avatar_url);
+        // this.renderGraph();
     }
+
     click_handler() {
         const nodesToAdd = [];
         const edgesToAdd = [];
         const clicking_node = this.state.clicking_node;
         console.log(clicking_node);
-        this.getFollowers(clicking_node["0"]);
-        let followers = this.state.followers;
-        console.log(followers);
-        if (clicking_node.length !== 0)  {
-            for (let i = 0; i < followers.length; i++) {
-                nodesToAdd.push(
-                    {id: followers[i].login, label: followers[i].login, shape: 'image', image: {
-                    selected: followers[i].avatar_url,
-                    unselected: followers[i].avatar_url}
+        var username = clicking_node["0"];
+        if (username) {
+            let request = new Request('http://localhost:3000/followers?name=' + username , {
+                method: 'GET',
+                cache: false
+            });
+            fetch(request)
+                .then((res) => res.json())
+                .then((data) => {
+                    console.log(data);
+                    this.setState({
+                        followers: data
+                    }, function () {
+                        var followers = this.state.followers;
+                        console.log(followers);
+                        console.log(followers.length);
+                        console.log(followers);
+                        if (clicking_node.length !== 0)  {
+                            if (followers.length === 0) {
+                                alert("Opps, this person has no followers");
+                                return;
+                            }
+                            for (let i = 0; i < followers.length; i++) {
+                                nodesToAdd.push(
+                                    {id: followers[i].login, label: followers[i].login, shape: 'image', image: {
+                                        selected: followers[i].avatar_url,
+                                        unselected: followers[i].avatar_url}
+                                    });
+                                edgesToAdd.push({from: clicking_node["0"], to: followers[i].login});
+                                this.addSubNetwork(nodesToAdd, edgesToAdd);
+                            }
+                        }
                     });
-                edgesToAdd.push({from: clicking_node["0"], to: followers[i].login});
-                this.addSubNetwork(nodesToAdd, edgesToAdd);
-            }
+                    return data;
+                });
         }
-
-        // this.setState({
-        //     clicked_nodes: this.state.clicked_nodes.push(this.state.clicking_node)
-        // });
     }
+
     // push is not a function because clicked nodes is an object not a array fix it tomorrow;
     hasNotBeenClicked(clicking_node) {
         console.log(this.state.clicked_nodes);
@@ -260,27 +276,188 @@ class Network extends React.Component {
         );
     }
 
-    render() {
-        return(
-            <div>
-                <div>
-                    <form onSubmit={this.handleSubmit}>
-                        <label>
-                            Name:
-                            <input type="text" value={this.state.value} onChange={this.handleChange}  />
-                        </label>
-                        <input type="submit" value="Submit" />
-                    </form>
-                </div>
-                <div onClick={this.click_handler.bind(this)}>
-                    {this.renderGraph()}
-                </div>
-                {/*<div>*/}
-                    {/*{this.renderGraph()}*/}
-                {/*</div>*/}
-            </div>
+    getUserInfo() {
+        var clicking_node = this.state.clicking_node;
+        var username = clicking_node['0'];
+        let request = new Request('http://localhost:3000/users?name=' + username , {
+            method: 'GET',
+            cache: false
+        });
+        fetch(request)
+            .then((res) => res.json())
+            .then((data) => {
+                this.setState({
+                    user: data,
+                });
+                return data;
+            });
+    }
 
-        );
+    getTraverseUser() {
+        var clicking_node = this.state.clicking_node;
+        var username = clicking_node['0'];
+        let request = new Request('http://localhost:3000/users?name=' + username , {
+            method: 'GET',
+            cache: false
+        });
+        fetch(request)
+            .then((res) => res.json())
+            .then((data) => {
+            if (this.state.tra_user.user_1 === '') {
+                this.setState({
+                    tra_user: {
+                        user_1: data.login,
+                    }
+                });
+                console.log("set user1");
+            } else  {
+                this.setState({
+                    tra_user: {
+                        user_1: this.state.tra_user.user_1,
+                        user_2: data.login,
+                    },
+                });
+            }
+            return data;
+            });
+        console.log(this.state.tra_user);
+    }
+
+    reset() {
+        this.setState( {
+            tra_user: {
+                user_1: '',
+                user_2: ''
+            }
+        });
+    }
+
+    caldis() {
+        var user_1 = this.state.tra_user.user_1;
+        var user_2 = this.state.tra_user.user_2;
+        var dis = 0;
+        var set = new Set();
+        if (user_1 && user_2) {
+            var q = queue();
+            q.push(user_1);
+            var edges = this.state.graph.edges;
+            while (q.length != 0) {
+                var size = q.length;
+                console.log('size is ' + size);
+                for (var i = 0; i < size; i++) {
+                    q.reverse();
+                    var cur = q.pop();
+                    set.add(cur);
+                    console.log('cur is ' + cur);
+                    if (cur === user_2) {
+                        // if (q.length === 0) {
+                        //     alert('the shortest distance is ' + dis+1);
+                        // } else {
+                        //     alert('the shortest distance is ' + (dis+1))};
+                        alert('the shortest distance is ' + dis);
+                        return ++dis;
+                    }
+                    this.addNeighbor(q, cur, set);
+                }
+                dis++;
+                console.log('dis++, dis = ' + dis);
+            }
+            alert('the shortest distance is infinity');
+            return 'infinity';
+        }
+        console.log(dis);
+
+    }
+
+    addNeighbor(q, cur, set) {
+        console.log(set);
+        var edges = this.state.graph.edges;
+        for (var i = 0; i < edges.length; i++) {
+            if (edges[i].from == cur && !set.contains(edges[i].to)) {
+                console.log(edges[i].to);
+                console.log('push to q ' + edges[i].to);
+                q.push(edges[i].to);
+            } else if (!set.contains(edges[i].from) && edges[i].to == cur) {
+                console.log('push to q ' + edges[i].from);
+                q.push(edges[i].from);
+                console.log(edges[i].from);
+            }
+        }
+    }
+
+    render() {
+        // init state
+        if (this.props.tabKey == 1) {
+            return(
+                <div>
+                    <div>
+                        <form onSubmit={this.handleSubmit}>
+                            <label>
+                                Github Username: &nbsp; <span></span>
+                                <input type="text" value={this.state.value} onChange={this.handleChange}  ></input>
+                            </label>
+                            &nbsp; &nbsp;
+                            <input type="image" src={require('../images/search.png')} height="20" width="20" />
+                        </form>
+                    </div>
+                    <div id="graph" onClick={this.click_handler.bind(this)}>
+                        {this.renderGraph()}
+                    </div>
+                </div>
+
+            );
+        } else if (this.props.tabKey == 2) {
+            // explore state
+            return (
+                <div>
+                    <div>
+                        <form onSubmit={this.handleSubmit}>
+                            <label>
+                                Github Username: &nbsp; <span></span>
+                                <input type="text" value={this.state.value} onChange={this.handleChange}  ></input>
+                            </label>
+                            &nbsp; &nbsp;
+                            <input type="image" src={require('../images/search.png')} height="20" width="20" />
+                        </form>
+                    </div>
+                    <div id="graph" onClick={this.getUserInfo.bind(this)}>
+                        {this.renderGraph()}
+                    </div>
+                    <div id="table">
+                        <UserTable userInfo={this.state.user} />
+                    </div>
+                </div>
+            )
+        } else {
+            return(
+                <div>
+                    <div>
+                        <form onSubmit={this.handleSubmit}>
+                            <label>
+                                Github Username: &nbsp; <span></span>
+                                <input type="text" value={this.state.value} onChange={this.handleChange}  ></input>
+                            </label>
+                            &nbsp; &nbsp;
+                            <input type="image" src={require('../images/search.png')} height="20" width="20" />
+                        </form>
+                    </div>
+                    <div id="graph" onClick={this.getTraverseUser.bind(this)}>
+                        {this.renderGraph()}
+                    </div>
+
+                    <div id="tratable" >
+                        <TraverseTable user_1={this.state.tra_user.user_1} user_2 = {this.state.tra_user.user_2}/>
+                    </div>
+                    <div id='reset'>
+                        <Button bsStyle="danger" bsSize="small" onClick={this.reset.bind(this)}>Reset</Button>
+                    </div>
+                    <div id='caldis'>
+                        <Button bsStyle="primary" bsSize="small" onClick={this.caldis.bind(this)}>Calculate Distance</Button>
+                    </div>
+                </div>
+            )
+        }
+
 
 
 

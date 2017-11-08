@@ -3,11 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
-    "react": "^15.6.1",
-    "react-bootstrap": "^0.31.1",
-    "react-dom": "^15.6.1",
+    "bootstrap": "^3.3.7",
+    "queue": "^4.4.1",
+    "react": "^15.6.2",
+    "react-bootstrap": "^0.31.3",
+    "react-dom": "^15.6.2",
     "react-graph-vis": "^0.1.2",
     "react-materialize": "^1.0.4",
+    "simple-hashset": "0.0.1",
     "vis": "^4.20.1"
   },
   "devDependencies": {

@@ -1,0 +1,32 @@
+#graph {
+    float: left;
+    margin-right: 20px;
+    border: 1px solid black;
+    width: 60%;
+}
+
+#table {
+    float: left;
+    width: 300px;
+    margin-left: 20px;
+    background-color: #777;
+
+}
+
+#tratable {
+    float: left;
+    width: 300px;
+    margin-left: 20px;
+}
+
+#reset {
+    float: left;
+    margin-left: 20px;
+
+}
+
+#caldis {
+    float: left;
+    margin-left: 20px;
+
+}

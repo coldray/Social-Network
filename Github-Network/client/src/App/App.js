@@ -1,12 +1,14 @@
 import React from 'react';
-import Network from '../Network/Network';
+import Navibar from '../Navbar/Navbar';
+import Tabbar from '../TabBar/Tabbar';
 import './App.css';
 
 class App extends React.Component {
   render() {
     return (
       <div>
-        <Network/>
+        <Navibar/>
+          <Tabbar/>
       </div>
     );
   }
