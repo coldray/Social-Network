@@ -1,244 +1,276 @@
 "use client";
 
-import { useRef, useCallback, useEffect, useState } from "react";
-import dynamic from "next/dynamic";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ReactFlow,
+  ReactFlowProvider,
+  type Node,
+  type Edge,
+  type NodeMouseHandler,
+  type OnNodeDrag,
+  MarkerType,
+  useReactFlow,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
 import { useGraphStore } from "@/store/graph-store";
-import { useGraph } from "@/hooks/useGraph";
+import { useGitHubUser } from "@/hooks/useGitHubUser";
 import { useShortestPath } from "@/hooks/useShortestPath";
+import { useForceLayout } from "@/hooks/useForceLayout";
+import { GitHubNode } from "./GitHubNode";
+import { GitHubNodeData } from "@/types/graph";
 import { Loader2 } from "lucide-react";
 
-// Dynamic import to avoid SSR issues with react-force-graph-2d
-const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), {
-  ssr: false,
-  loading: () => (
-    <div className="flex items-center justify-center h-full">
-      <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-    </div>
-  ),
-});
+// Define nodeTypes OUTSIDE the component to avoid remounting
+const nodeTypes = { github: GitHubNode };
 
-interface ImageCache {
-  [key: string]: HTMLImageElement;
-}
+type FlowNode = Node<GitHubNodeData, "github">;
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type ForceGraphNode = any;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type ForceGraphLink = any;
+function NetworkGraphInner() {
+  const {
+    nodes,
+    edges,
+    mode,
+    loading,
+    hoveredNode,
+    setHoveredNode,
+    setLoading,
+    setError,
+    addUserWithFollowers,
+    setSelectedNode,
+    updateNodeData,
+    updateNodePosition,
+  } = useGraphStore();
 
-export function NetworkGraph() {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const imageCache = useRef<ImageCache>({});
-  const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
+  const { fetchFollowers, fetchUser } = useGitHubUser();
+  const { selectDistanceUser, isNodeInPath, isEdgeInPath, isDistanceUser } =
+    useShortestPath();
+  const { fitView } = useReactFlow();
 
-  const { nodes, edges, mode, loading, setHoveredNode } = useGraphStore();
-  const { expandNode, selectAndFetchUserInfo } = useGraph();
-  const { selectDistanceUser, isNodeInPath, isEdgeInPath, isDistanceUser } = useShortestPath();
+  // Track root node
+  const [rootNodeId, setRootNodeId] = useState<string | null>(null);
+  const [isLayoutting, setIsLayoutting] = useState(false);
+  const prevNodeCount = useRef(0);
 
-  // Convert Map to array for the graph
-  const graphData = {
-    nodes: Array.from(nodes.values()).map(node => ({
-      ...node,
-      fx: node.fx ?? undefined,
-      fy: node.fy ?? undefined,
-    })),
-    links: Array.from(edges.values()).map((edge) => ({
-      ...edge,
-      source: edge.source,
-      target: edge.target,
-    })),
-  };
-
-  // Handle resize
   useEffect(() => {
-    const updateDimensions = () => {
-      if (containerRef.current) {
-        setDimensions({
-          width: containerRef.current.clientWidth,
-          height: containerRef.current.clientHeight,
-        });
-      }
-    };
+    if (nodes.size > 0 && !rootNodeId) {
+      setRootNodeId(Array.from(nodes.keys())[0]);
+    }
+    if (nodes.size === 0) {
+      setRootNodeId(null);
+    }
+  }, [nodes.size, rootNodeId]);
 
-    updateDimensions();
-    window.addEventListener("resize", updateDimensions);
-    return () => window.removeEventListener("resize", updateDimensions);
-  }, []);
+  // Run force layout
+  const positions = useForceLayout(nodes, edges);
 
-  // Preload images
+  // Show "Arranging..." briefly when nodes change
   useEffect(() => {
-    nodes.forEach((node) => {
-      if (!imageCache.current[node.id] && node.avatar_url) {
-        const img = new Image();
-        img.src = node.avatar_url;
-        img.crossOrigin = "anonymous";
-        imageCache.current[node.id] = img;
-      }
+    if (nodes.size !== prevNodeCount.current && nodes.size > 0) {
+      setIsLayoutting(true);
+      prevNodeCount.current = nodes.size;
+      const timer = setTimeout(() => {
+        setIsLayoutting(false);
+        // Fit view after layout settles
+        fitView({ padding: 0.2, duration: 300 });
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [nodes.size, fitView]);
+
+  // Convert store nodes → React Flow nodes
+  const flowNodes: FlowNode[] = useMemo(() => {
+    return Array.from(nodes.values()).map((node) => {
+      const pos = positions.get(node.id);
+      return {
+        id: node.id,
+        type: "github" as const,
+        position: { x: pos?.x ?? node.x ?? 0, y: pos?.y ?? node.y ?? 0 },
+        data: {
+          login: node.login,
+          avatar_url: node.avatar_url,
+          isRoot: node.id === rootNodeId,
+          expanded: node.expanded ?? false,
+          isHovered: node.id === hoveredNode,
+          isDistanceUser: isDistanceUser(node.id),
+          isInPath: isNodeInPath(node.id),
+          mode,
+        },
+      };
     });
-  }, [nodes]);
+  }, [nodes, positions, rootNodeId, hoveredNode, mode, isDistanceUser, isNodeInPath]);
 
-  const handleNodeClick = useCallback(
-    (node: ForceGraphNode) => {
+  // Convert store edges → React Flow edges
+  const flowEdges: Edge[] = useMemo(() => {
+    return Array.from(edges.values()).map((edge) => {
+      const inPath = mode === "distance" && isEdgeInPath(edge.id);
+      return {
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        style: {
+          stroke: inPath ? "#22c55e" : "rgba(148, 163, 184, 0.4)",
+          strokeWidth: inPath ? 3 : 1.5,
+        },
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          width: 12,
+          height: 12,
+          color: inPath ? "#22c55e" : "rgba(148, 163, 184, 0.4)",
+        },
+      };
+    });
+  }, [edges, mode, isEdgeInPath]);
+
+  // Node click handler
+  const handleNodeClick: NodeMouseHandler<FlowNode> = useCallback(
+    async (_event, node) => {
       if (!node?.id) return;
-      switch (mode) {
-        case "expand":
-          expandNode(node.id);
-          break;
-        case "explore":
-          selectAndFetchUserInfo(node.id);
-          break;
-        case "distance":
-          selectDistanceUser(node.id);
-          break;
+
+      if (mode === "expand") {
+        const currentNodes = useGraphStore.getState().nodes;
+        const currentNode = currentNodes.get(node.id);
+        if (!currentNode || currentNode.expanded) return;
+
+        setLoading(true);
+        setError(null);
+
+        try {
+          const followers = await fetchFollowers(node.id, 1, 10);
+          addUserWithFollowers(
+            { login: currentNode.login, avatar_url: currentNode.avatar_url },
+            followers
+          );
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Failed to expand");
+        } finally {
+          setLoading(false);
+        }
+      } else if (mode === "explore") {
+        setSelectedNode(node.id);
+        const currentNodes = useGraphStore.getState().nodes;
+        const currentNode = currentNodes.get(node.id);
+        if (currentNode && !currentNode.userData) {
+          try {
+            const user = await fetchUser(node.id);
+            if (user) updateNodeData(node.id, user);
+          } catch {
+            // ignore
+          }
+        }
+      } else if (mode === "distance") {
+        selectDistanceUser(node.id);
       }
     },
-    [mode, expandNode, selectAndFetchUserInfo, selectDistanceUser]
+    [
+      mode,
+      fetchFollowers,
+      fetchUser,
+      addUserWithFollowers,
+      setLoading,
+      setError,
+      setSelectedNode,
+      updateNodeData,
+      selectDistanceUser,
+    ]
   );
 
-  const handleNodeHover = useCallback(
-    (node: ForceGraphNode | null) => {
-      setHoveredNode(node?.id || null);
-      if (containerRef.current) {
-        containerRef.current.style.cursor = node ? "pointer" : "grab";
-      }
+  // Hover handlers
+  const handleNodeMouseEnter: NodeMouseHandler<FlowNode> = useCallback(
+    (_event, node) => {
+      setHoveredNode(node.id);
     },
     [setHoveredNode]
   );
 
-  const nodeCanvasObject = useCallback(
-    (node: ForceGraphNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
-      if (!node?.id || !node?.login) return;
-
-      const size = 20;
-      const x = node.x || 0;
-      const y = node.y || 0;
-
-      // Determine node styling based on state
-      let strokeColor = "#666";
-      let strokeWidth = 1;
-
-      if (mode === "distance") {
-        if (isDistanceUser(node.id)) {
-          strokeColor = "#f59e0b"; // amber for selected
-          strokeWidth = 3;
-        } else if (isNodeInPath(node.id)) {
-          strokeColor = "#22c55e"; // green for path
-          strokeWidth = 2;
-        }
-      }
-
-      if (node.expanded) {
-        strokeColor = "#3b82f6"; // blue for expanded
-        strokeWidth = strokeWidth === 1 ? 2 : strokeWidth;
-      }
-
-      // Draw circle background
-      ctx.beginPath();
-      ctx.arc(x, y, size / 2 + strokeWidth, 0, 2 * Math.PI);
-      ctx.fillStyle = strokeColor;
-      ctx.fill();
-
-      // Draw avatar
-      const img = imageCache.current[node.id];
-      if (img && img.complete) {
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(x, y, size / 2, 0, 2 * Math.PI);
-        ctx.clip();
-        ctx.drawImage(img, x - size / 2, y - size / 2, size, size);
-        ctx.restore();
-      } else {
-        // Fallback circle
-        ctx.beginPath();
-        ctx.arc(x, y, size / 2, 0, 2 * Math.PI);
-        ctx.fillStyle = "#e5e7eb";
-        ctx.fill();
-
-        // Draw initial
-        ctx.font = "10px sans-serif";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillStyle = "#374151";
-        ctx.fillText(node.login.charAt(0).toUpperCase(), x, y);
-      }
-
-      // Draw label below
-      if (globalScale > 0.5) {
-        ctx.font = `${10 / globalScale}px sans-serif`;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "top";
-        ctx.fillStyle = "#374151";
-        ctx.fillText(node.login, x, y + size / 2 + 2);
-      }
+  const handleNodeMouseLeave: NodeMouseHandler<FlowNode> = useCallback(
+    () => {
+      setHoveredNode(null);
     },
-    [mode, isDistanceUser, isNodeInPath]
+    [setHoveredNode]
   );
 
-  const nodePointerAreaPaint = useCallback(
-    (node: ForceGraphNode, color: string, ctx: CanvasRenderingContext2D) => {
-      ctx.beginPath();
-      ctx.arc(node.x || 0, node.y || 0, 12, 0, 2 * Math.PI);
-      ctx.fillStyle = color;
-      ctx.fill();
+  // Drag end handler — write position back to store
+  const handleNodeDragStop: OnNodeDrag<FlowNode> = useCallback(
+    (_event, node) => {
+      updateNodePosition(node.id, node.position.x, node.position.y);
     },
-    []
-  );
-
-  const linkColor = useCallback(
-    (link: ForceGraphLink) => {
-      if (mode === "distance" && link?.id && isEdgeInPath(link.id)) {
-        return "#22c55e"; // green for path
-      }
-      return "#999";
-    },
-    [mode, isEdgeInPath]
-  );
-
-  const linkWidth = useCallback(
-    (link: ForceGraphLink) => {
-      if (mode === "distance" && link?.id && isEdgeInPath(link.id)) {
-        return 3;
-      }
-      return 1;
-    },
-    [mode, isEdgeInPath]
+    [updateNodePosition]
   );
 
   return (
-    <div ref={containerRef} className="w-full h-full bg-background">
+    <div className="w-full h-full bg-background relative">
+      {/* Loading overlay */}
       {loading && (
         <div className="absolute inset-0 flex items-center justify-center bg-background/50 z-10">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
       )}
 
+      {/* Empty state */}
       {nodes.size === 0 ? (
         <div className="flex items-center justify-center h-full text-muted-foreground">
           <p>Search for a GitHub user to start exploring</p>
         </div>
       ) : (
-        <ForceGraph2D
-          width={dimensions.width}
-          height={dimensions.height}
-          graphData={graphData}
-          nodeId="id"
-          nodeLabel="login"
-          nodeCanvasObject={nodeCanvasObject}
-          nodePointerAreaPaint={nodePointerAreaPaint}
+        <ReactFlow
+          nodes={flowNodes}
+          edges={flowEdges}
+          nodeTypes={nodeTypes}
           onNodeClick={handleNodeClick}
-          onNodeHover={handleNodeHover}
-          linkColor={linkColor}
-          linkWidth={linkWidth}
-          linkDirectionalArrowLength={6}
-          linkDirectionalArrowRelPos={1}
-          d3AlphaDecay={0.02}
-          d3VelocityDecay={0.3}
-          cooldownTicks={100}
-          enableNodeDrag={true}
-          enableZoomInteraction={true}
-          enablePanInteraction={true}
+          onNodeMouseEnter={handleNodeMouseEnter}
+          onNodeMouseLeave={handleNodeMouseLeave}
+          onNodeDragStop={handleNodeDragStop}
+          fitView
+          fitViewOptions={{ padding: 0.2 }}
+          proOptions={{ hideAttribution: true }}
+          minZoom={0.1}
+          maxZoom={4}
+          nodesDraggable
+          nodesConnectable={false}
+          elementsSelectable={false}
+          selectNodesOnDrag={false}
         />
       )}
+
+      {/* Status indicator */}
+      <div className="absolute bottom-4 left-4 bg-card/95 backdrop-blur border rounded-md px-3 py-2 text-xs shadow-sm">
+        <div className="flex items-center gap-2">
+          <span
+            className={`w-2 h-2 rounded-full ${
+              isLayoutting
+                ? "bg-yellow-500 animate-pulse"
+                : "bg-green-500"
+            }`}
+          ></span>
+          <span className="font-medium">
+            {isLayoutting ? "Arranging..." : "Ready"}
+          </span>
+        </div>
+        <div className="text-muted-foreground mt-1 capitalize">
+          {mode} mode
+        </div>
+      </div>
+
+      {/* Help text */}
+      <div className="absolute bottom-4 right-4 bg-card/95 backdrop-blur border rounded-md px-3 py-2 text-xs text-muted-foreground shadow-sm">
+        <div>
+          Click node to{" "}
+          {mode === "expand"
+            ? "expand"
+            : mode === "explore"
+            ? "view info"
+            : "select"}
+        </div>
+        <div>Drag node to move</div>
+      </div>
     </div>
+  );
+}
+
+export function NetworkGraph() {
+  return (
+    <ReactFlowProvider>
+      <NetworkGraphInner />
+    </ReactFlowProvider>
   );
 }

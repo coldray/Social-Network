@@ -4,21 +4,20 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useShortestPath } from "@/hooks/useShortestPath";
 import { useGraphStore } from "@/store/graph-store";
-import { X, ArrowRight, Route } from "lucide-react";
+import { X, ArrowRight, Route, ChevronRight } from "lucide-react";
 
 export function DistancePanel() {
   const {
     distanceUser1,
     distanceUser2,
     distance,
-    getUser1Name,
-    getUser2Name,
     clearDistanceSelection,
     calculatePath,
     clearPath,
   } = useShortestPath();
 
   const nodes = useGraphStore((state) => state.nodes);
+  const pathList = useGraphStore((state) => state.pathList);
 
   const user1 = distanceUser1 ? nodes.get(distanceUser1) : null;
   const user2 = distanceUser2 ? nodes.get(distanceUser2) : null;
@@ -136,25 +135,49 @@ export function DistancePanel() {
       </div>
 
       {/* Result */}
-      {distance !== null && (
+      {distance !== null && pathList.length > 0 && (
         <Card className="bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-900">
           <CardContent className="pt-4">
-            <div className="text-center">
+            <div className="text-center mb-4">
               <div className="text-3xl font-bold text-green-600 dark:text-green-400">
                 {distance}
               </div>
               <div className="text-sm text-muted-foreground">
                 {distance === 1 ? "degree of separation" : "degrees of separation"}
               </div>
-              <div className="text-xs text-muted-foreground mt-1">
-                {getUser1Name()} → {getUser2Name()}
+            </div>
+
+            {/* Path visualization */}
+            <div className="border-t border-green-200 dark:border-green-800 pt-3 mt-3">
+              <div className="text-xs font-medium text-muted-foreground mb-2">Path:</div>
+              <div className="flex flex-wrap items-center gap-1">
+                {pathList.map((nodeId, index) => {
+                  const node = nodes.get(nodeId);
+                  return (
+                    <div key={nodeId} className="flex items-center">
+                      <div className="flex items-center gap-1 bg-white dark:bg-green-900/30 rounded-full px-2 py-1 border border-green-200 dark:border-green-800">
+                        {node?.avatar_url && (
+                          <img
+                            src={node.avatar_url}
+                            alt={nodeId}
+                            className="w-4 h-4 rounded-full"
+                          />
+                        )}
+                        <span className="text-xs font-medium">{nodeId}</span>
+                      </div>
+                      {index < pathList.length - 1 && (
+                        <ChevronRight className="h-3 w-3 text-green-500 mx-0.5 flex-shrink-0" />
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </CardContent>
         </Card>
       )}
 
-      {distance === null && distanceUser1 && distanceUser2 && (
+      {distance === null && distanceUser1 && distanceUser2 && pathList.length === 0 && (
         <Card className="bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-900">
           <CardContent className="pt-4">
             <p className="text-sm text-center text-red-600 dark:text-red-400">

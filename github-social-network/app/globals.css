@@ -57,3 +57,16 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* React Flow custom node overrides */
+.react-flow__node-github {
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.react-flow__node-github.selected {
+  box-shadow: none;
+}

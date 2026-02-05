@@ -20,6 +20,7 @@ interface GraphState {
   distanceUser2: string | null;
   pathNodes: Set<string>;
   pathEdges: Set<string>;
+  pathList: string[]; // Ordered list of nodes in path
   distance: number | null;
 
   // Actions
@@ -35,7 +36,7 @@ interface GraphState {
   updateNodeData: (nodeId: string, userData: GitHubUser) => void;
   markNodeExpanded: (nodeId: string) => void;
 
-  // Add user and their followers
+  // Add user and their followers with radial positioning
   addUserWithFollowers: (
     user: { login: string; avatar_url: string },
     followers: GitHubFollower[]
@@ -46,6 +47,9 @@ interface GraphState {
   clearDistanceSelection: () => void;
   calculatePath: () => void;
   clearPath: () => void;
+
+  // Position update (for drag write-back)
+  updateNodePosition: (nodeId: string, x: number, y: number) => void;
 
   // Reset
   reset: () => void;
@@ -63,6 +67,7 @@ const initialState = {
   distanceUser2: null,
   pathNodes: new Set<string>(),
   pathEdges: new Set<string>(),
+  pathList: [] as string[],
   distance: null,
 };
 
@@ -122,30 +127,49 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   },
 
   addUserWithFollowers: (user, followers) => {
-    const { nodes, edges, addNode, addEdge, markNodeExpanded } = get();
+    const { nodes, edges } = get();
+    const newNodes = new Map(nodes);
+    const newEdges = new Map(edges);
+
+    // Get parent node position (or use center if first node)
+    const parentNode = nodes.get(user.login);
+    const parentX = parentNode?.x ?? 0;
+    const parentY = parentNode?.y ?? 0;
 
     // Add the main user node if not exists
-    if (!nodes.has(user.login)) {
-      addNode({
+    if (!newNodes.has(user.login)) {
+      newNodes.set(user.login, {
         id: user.login,
         login: user.login,
         avatar_url: user.avatar_url,
+        x: parentX,
+        y: parentY,
       });
     }
 
-    // Add followers and edges
-    followers.forEach((follower) => {
-      if (!nodes.has(follower.login)) {
-        addNode({
+    // Add followers in a simple circle around parent
+    // Force simulation will adjust positions
+    const radius = 150;
+    const angleStep = (2 * Math.PI) / Math.max(followers.length, 1);
+
+    followers.forEach((follower, index) => {
+      if (!newNodes.has(follower.login)) {
+        const angle = angleStep * index - Math.PI / 2;
+        const x = parentX + radius * Math.cos(angle);
+        const y = parentY + radius * Math.sin(angle);
+
+        newNodes.set(follower.login, {
           id: follower.login,
           login: follower.login,
           avatar_url: follower.avatar_url,
+          x,
+          y,
         });
       }
 
       const edgeId = `${follower.login}->${user.login}`;
-      if (!edges.has(edgeId)) {
-        addEdge({
+      if (!newEdges.has(edgeId)) {
+        newEdges.set(edgeId, {
           id: edgeId,
           source: follower.login,
           target: user.login,
@@ -154,7 +178,12 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     });
 
     // Mark user as expanded
-    markNodeExpanded(user.login);
+    const userNode = newNodes.get(user.login);
+    if (userNode) {
+      newNodes.set(user.login, { ...userNode, expanded: true });
+    }
+
+    set({ nodes: newNodes, edges: newEdges });
   },
 
   selectDistanceUser: (nodeId) => {
@@ -215,12 +244,14 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       set({
         pathNodes: pathNodesSet,
         pathEdges: pathEdgesSet,
+        pathList: result.path,
         distance: result.distance,
       });
     } else {
       set({
         pathNodes: new Set(),
         pathEdges: new Set(),
+        pathList: [],
         distance: null,
         error: "No path found between these users",
       });
@@ -231,11 +262,28 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     set({
       pathNodes: new Set(),
       pathEdges: new Set(),
+      pathList: [],
       distance: null,
     });
   },
 
+  updateNodePosition: (nodeId, x, y) => {
+    const { nodes } = get();
+    const node = nodes.get(nodeId);
+    if (node) {
+      const newNodes = new Map(nodes);
+      newNodes.set(nodeId, { ...node, x, y, fx: x, fy: y });
+      set({ nodes: newNodes });
+    }
+  },
+
   reset: () => {
-    set(initialState);
+    set({
+      ...initialState,
+      nodes: new Map(),
+      edges: new Map(),
+      pathNodes: new Set(),
+      pathEdges: new Set(),
+    });
   },
 }));
